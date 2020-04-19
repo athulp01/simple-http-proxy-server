@@ -56,7 +56,7 @@ the ./btest program.
 
 The Makefile in this directory compiles your version of bits.c with
 additional code to create a program (or test harness) named btest.
-
+./
 To compile and run the btest program, type:
 
     unix> make btest
