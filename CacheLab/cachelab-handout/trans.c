@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include "cachelab.h"
 
+
 int is_transpose(int M, int N, int A[N][M], int B[M][N]);
 
 /* 
@@ -22,6 +23,16 @@ int is_transpose(int M, int N, int A[N][M], int B[M][N]);
 char transpose_submit_desc[] = "Transpose submission";
 void transpose_submit(int M, int N, int A[N][M], int B[M][N])
 {
+    int BLOCK = 8;
+    for(int i=0; i<N; i+=BLOCK) {
+        for(int j=0; j<M; j+=BLOCK) {
+            for(int bi=i; bi<i+BLOCK && bi<N; bi++) {
+                for(int bj=j; bj<j+BLOCK && bj<M; bj++) {
+                    B[bj][bi] = A[bi][bj];
+                }
+            }
+        }
+    }
 }
 
 /* 

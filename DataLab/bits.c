@@ -163,7 +163,7 @@ int tmin(void) {
  *   Rating: 1
  */
 int isTmax(int x) {
-  return !(~(x+x)^1);
+  return !((x+1)^(~x));
 }
 /* 
  * allOddBits - return 1 if all odd-numbered bits in word set to 1
@@ -201,11 +201,9 @@ int negate(int x) {
  *   Rating: 3
  */
 int isAsciiDigit(int x) {
-    int tmp = 0&(x>>24);
-    tmp = 0&(x>>16);
-    tmp = 0&(x>>8);
-    tmp = 0x3&(x>>4);
-  return 2;
+  int great = !(((x + (~0x30+1))>>31) & 1);
+  int less = !(((0x39 + (~x+1))>>31)&1);
+  return (great & less);
 }
 /* 
  * conditional - same as x ? y : z 
@@ -225,7 +223,7 @@ int conditional(int x, int y, int z) {
  *   Rating: 3
  */
 int isLessOrEqual(int x, int y) {
-  return 2;
+  return !((((~x+1)+y)>>31)&1);
 }
 //4
 /* 
