@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,31 +17,36 @@ static const char *http_version = "HTTP/1.0\r\n";
 static const char *proxy_hdr = "Proxy-Connection: close\r\n";
 static const char *connection_hdr = "Connection: close\r\n";
 
-int parse_get(char *request_src, char *hostname, char *path) {
+int parse_get(char *request_src, char *hostname, char *path, char *port) {
     char *request = strdup(request_src);
     char *saveptr = request;
     char *field = strtok_r(request, " ", &saveptr);
     if(strcmp(request, "GET"))
         return 1;
-    char *addr = strtok_r(NULL, " ", &saveptr);
-    int count = 0, i;
+    char *addr = strtok_r(NULL, " ", &saveptr) + 7;
     int size = strlen(addr);
-    for(i=0; i<size && count<=2; i++) {
-        if(addr[i] == '/') count++;
+    char* end_host_idx = strchr(addr, '/');
+    strcpy(path, end_host_idx);
+    char *start_port_idx = strchr(addr, ':');
+    if(start_port_idx) {
+        strncpy(hostname, addr, start_port_idx-addr);
+        start_port_idx++;
+        while(isdigit(*start_port_idx) && (*port++=*start_port_idx++));
+    } else {
+        strncpy(hostname, addr, end_host_idx - addr);
     }
-    strncpy(hostname, addr+7, i-1-7);
-    strcpy(path, addr+i-1);
     return 0;
 }
 
-char *generate_req(int clientfd, char *hostname) {
+char *generate_req(int clientfd, char *hostname, char *port) {
     char *request = malloc(MAX_BUF_SIZE);
     rio_t rio;
     char buf[MAX_BUF_SIZE];
     char path[MAX_BUF_SIZE];
     Rio_readinitb(&rio, clientfd);
     int n = rio_readlineb(&rio, buf, MAX_BUF_SIZE);
-    parse_get(buf, hostname, path);
+    parse_get(buf, hostname, path, port);
+    printf("%s %s %s\n",hostname, path, port);
     sprintf(request, "GET %s HTTP/1.0\r\n", path);
     int ishostpres = 0;
     while((n = rio_readlineb(&rio, buf, MAX_BUF_SIZE)) > 0) {
@@ -62,11 +68,19 @@ void *proxy_requests(void *varargs) {
     int clientfd = *((int*)varargs);
     Pthread_detach(Pthread_self());
     char hostname[MAX_BUF_SIZE], buf[MAX_BUF_SIZE];
+    char port[10], default_port[] = "80";
+    memset(port, 0, 10);
     memset(hostname, 0, MAX_BUF_SIZE);
     memset(buf, 0, MAX_BUF_SIZE);
-    char *request = generate_req(clientfd, hostname);
-    printf("%s %s\n", hostname, request);
-    int remote_conn_fd = Open_clientfd(hostname, "80");
+    char *request = generate_req(clientfd, hostname, port);
+    if(port[0]==0) strcat(port, "80");
+    printf("Opening a connection to %s at %s\n", hostname, port);
+    int remote_conn_fd = Open_clientfd(hostname, port);
+    if(remote_conn_fd < 0) {
+        Close(clientfd);
+        Free(varargs);
+        return NULL;
+    }
     rio_t rio;
     Rio_readinitb(&rio, remote_conn_fd);
     rio_writen(remote_conn_fd, request, strlen(request));
@@ -91,9 +105,8 @@ int main(int argc, char *argv[])
     while(1) {
         clientfd = malloc(sizeof(int));
         *clientfd = Accept(listenfd, (struct sockaddr*)&client, &clientlen);
-        printf("Got connection\n");
         Pthread_create(&tid, NULL, proxy_requests, clientfd);
-        printf("Over\n");
     }
+    Close(listenfd);
     return 0;
 }
