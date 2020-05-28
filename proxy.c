@@ -5,10 +5,9 @@
 #include <string.h>
 #include <sys/socket.h>
 #include "csapp.h"
+#include "cache.h"
 
 /* Recommended max cache and object sizes */
-#define MAX_CACHE_SIZE 1049000
-#define MAX_OBJECT_SIZE 102400
 #define MAX_BUF_SIZE MAXLINE
 
 /* You won't lose style points for including this long line in your code */
@@ -17,13 +16,15 @@ static const char *http_version = "HTTP/1.0\r\n";
 static const char *proxy_hdr = "Proxy-Connection: close\r\n";
 static const char *connection_hdr = "Connection: close\r\n";
 
-int parse_get(char *request_src, char *hostname, char *path, char *port) {
+int parse_get(char *request_src, char *hostname, char *path, char *port, char **url) {
     char *request = strdup(request_src);
     char *saveptr = request;
     char *field = strtok_r(request, " ", &saveptr);
     if(strcmp(request, "GET"))
         return 1;
-    char *addr = strtok_r(NULL, " ", &saveptr) + 7;
+    char *addr = strtok_r(NULL, " ", &saveptr);
+    *url = addr;
+    addr += 7;
     int size = strlen(addr);
     char* end_host_idx = strchr(addr, '/');
     strcpy(path, end_host_idx);
@@ -38,14 +39,14 @@ int parse_get(char *request_src, char *hostname, char *path, char *port) {
     return 0;
 }
 
-char *generate_req(int clientfd, char *hostname, char *port) {
+char *generate_req(int clientfd, char *hostname, char *port, char **url) {
     char *request = malloc(MAX_BUF_SIZE);
     rio_t rio;
     char buf[MAX_BUF_SIZE];
     char path[MAX_BUF_SIZE];
     Rio_readinitb(&rio, clientfd);
     int n = rio_readlineb(&rio, buf, MAX_BUF_SIZE);
-    parse_get(buf, hostname, path, port);
+    parse_get(buf, hostname, path, port, url);
     printf("%s %s %s\n",hostname, path, port);
     sprintf(request, "GET %s HTTP/1.0\r\n", path);
     int ishostpres = 0;
@@ -67,12 +68,22 @@ char *generate_req(int clientfd, char *hostname, char *port) {
 void *proxy_requests(void *varargs) {
     int clientfd = *((int*)varargs);
     Pthread_detach(Pthread_self());
-    char hostname[MAX_BUF_SIZE], buf[MAX_BUF_SIZE];
+    char hostname[MAX_BUF_SIZE], buf[MAX_BUF_SIZE], *url;
     char port[10], default_port[] = "80";
     memset(port, 0, 10);
     memset(hostname, 0, MAX_BUF_SIZE);
     memset(buf, 0, MAX_BUF_SIZE);
-    char *request = generate_req(clientfd, hostname, port);
+    char *request = generate_req(clientfd, hostname, port, &url);
+    struct web_object *cached = search_cache(url);
+    if(cached) {
+        printf("Serving from cache %s\n", url);
+        printf("data = %s\n", cached->data);
+        Rio_writen(clientfd, cached->data, cached->size);
+        Close(clientfd);
+        free(request);
+        free(varargs);
+        return NULL;
+    }
     if(port[0]==0) strcat(port, "80");
     printf("Opening a connection to %s at %s\n", hostname, port);
     int remote_conn_fd = Open_clientfd(hostname, port);
@@ -84,10 +95,17 @@ void *proxy_requests(void *varargs) {
     rio_t rio;
     Rio_readinitb(&rio, remote_conn_fd);
     rio_writen(remote_conn_fd, request, strlen(request));
-    int size;
+    int size, cur_size=0;
+    char full_file[MAX_OBJECT_SIZE];
+    int valid = 1;
     while((size = rio_readlineb(&rio, buf, MAX_BUF_SIZE)) != 0) {
+        if(cur_size+size < MAX_BUF_SIZE) {
+            memcpy(full_file+cur_size, buf, size);
+            cur_size += size;
+        } else valid = 0;
         rio_writen(clientfd, buf, size);
     }
+    if(valid && cur_size <= MAX_OBJECT_SIZE) add_to_cache(url, full_file, cur_size);
     Close(clientfd);
     Close(remote_conn_fd);
     free(varargs);
