@@ -7,25 +7,23 @@
 #include "csapp.h"
 #include "cache.h"
 
-/* Recommended max cache and object sizes */
 #define MAX_BUF_SIZE MAXLINE
 
-/* You won't lose style points for including this long line in your code */
-static const char *user_agent_hdr = "User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:10.0.3) Gecko/20120305 Firefox/10.0.3\r\n";
-static const char *http_version = "HTTP/1.0\r\n";
 static const char *proxy_hdr = "Proxy-Connection: close\r\n";
 static const char *connection_hdr = "Connection: close\r\n";
 
+pthread_rwlock_t lock;
+
 int parse_get(char *request_src, char *hostname, char *path, char *port, char **url) {
+    printf("%s",request_src);
     char *request = strdup(request_src);
     char *saveptr = request;
-    char *field = strtok_r(request, " ", &saveptr);
+    strtok_r(request, " ", &saveptr);
     if(strcmp(request, "GET"))
         return 1;
     char *addr = strtok_r(NULL, " ", &saveptr);
     *url = addr;
     addr += 7;
-    int size = strlen(addr);
     char* end_host_idx = strchr(addr, '/');
     strcpy(path, end_host_idx);
     char *start_port_idx = strchr(addr, ':');
@@ -34,6 +32,7 @@ int parse_get(char *request_src, char *hostname, char *path, char *port, char **
         start_port_idx++;
         while(isdigit(*start_port_idx) && (*port++=*start_port_idx++));
     } else {
+        strcpy(port, "80");
         strncpy(hostname, addr, end_host_idx - addr);
     }
     return 0;
@@ -60,6 +59,7 @@ char *generate_req(int clientfd, char *hostname, char *port, char **url) {
         sprintf(request, "%s%s",request, buf);
     }
     sprintf(request, "%s%s",request,proxy_hdr);
+    sprintf(request, "%s%s",request,connection_hdr);
     if(ishostpres) sprintf(request, "%sHost: %s\r\n",request, hostname);
     sprintf(request, "%s\r\n", request);
     return request;
@@ -69,7 +69,7 @@ void *proxy_requests(void *varargs) {
     int clientfd = *((int*)varargs);
     Pthread_detach(Pthread_self());
     char hostname[MAX_BUF_SIZE], buf[MAX_BUF_SIZE], *url;
-    char port[10], default_port[] = "80";
+    char port[10];
     memset(port, 0, 10);
     memset(hostname, 0, MAX_BUF_SIZE);
     memset(buf, 0, MAX_BUF_SIZE);
@@ -77,7 +77,6 @@ void *proxy_requests(void *varargs) {
     struct web_object *cached = search_cache(url);
     if(cached) {
         printf("Serving from cache %s\n", url);
-        printf("data = %s\n", cached->data);
         Rio_writen(clientfd, cached->data, cached->size);
         Close(clientfd);
         free(request);
@@ -85,7 +84,7 @@ void *proxy_requests(void *varargs) {
         return NULL;
     }
     if(port[0]==0) strcat(port, "80");
-    printf("Opening a connection to %s at %s\n", hostname, port);
+    //printf("Opening a connection to %s at %s\n", hostname, port);
     int remote_conn_fd = Open_clientfd(hostname, port);
     if(remote_conn_fd < 0) {
         Close(clientfd);
@@ -115,6 +114,7 @@ void *proxy_requests(void *varargs) {
 
 int main(int argc, char *argv[])
 {
+    if (pthread_rwlock_init(&lock,NULL) != 0) uthash_fatal("can't create rwlock");
     int listenfd = Open_listenfd(argv[1]);
     int *clientfd;
     struct sockaddr_storage client;

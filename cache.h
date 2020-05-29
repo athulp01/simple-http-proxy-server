@@ -6,6 +6,8 @@
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
 
+extern pthread_rwlock_t lock;
+
 struct web_object {
     char *url;
     char *data;
